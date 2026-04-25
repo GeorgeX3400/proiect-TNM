@@ -38,6 +38,7 @@ export const noiseUniforms = {
   uOctaves:         { value: 6 },
   uFrequency:       { value: 1.0 },
   uAmplitude:       { value: 1.5 },
+  uNoiseOffsetX:    { value: 0.0 },
   uLacunarity:      { value: 2.0 },
   uGain:            { value: 0.5 },
   uBiomeOctaves:    { value: 4 },

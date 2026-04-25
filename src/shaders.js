@@ -52,6 +52,7 @@ export const terrainVertexShader = /* glsl */ `
   uniform vec3  uCameraPos;
   uniform float uRoadHalfWidth;
   uniform float uRoadDivisor;
+  uniform float uNoiseOffsetX;
 
   varying vec3 vColor;
   varying vec3 vWorldPos;
@@ -109,7 +110,7 @@ export const terrainVertexShader = /* glsl */ `
 
     if (usingNoise == 1) {
       vec4 worldPos = modelMatrix * vec4(position, 1.0);
-      vec2 uv = worldPos.xz * uNoiseScale;
+      vec2 uv = (worldPos.xz + vec2(uNoiseOffsetX, 0.0)) * uNoiseScale;
 
       float noise = perlinFBM(uv, uOctaves, uFrequency, uAmplitude, uLacunarity, uGain);
       float bnoise = perlinFBM(uv, uBiomeOctaves, uBiomeFrequency, uBiomeAmplitude, uBiomeLacunarity, uBiomeGain);
