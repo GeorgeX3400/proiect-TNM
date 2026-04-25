@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "vite": "^8.0.1"
+  },
+  "dependencies": {
+    "@webpd/runtime": "^0.1.2"
   }
 }
