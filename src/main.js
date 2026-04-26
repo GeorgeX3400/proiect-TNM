@@ -1,7 +1,8 @@
 import * as THREE from 'three';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { noiseUniforms, terrainGroup, terrainMaterial } from './terrain.js';
 import { sunGroup, updateSunPosition } from './sun.js';
-import { bgScene, bgCamera } from './background.js';
+import { skyDome } from './background.js';
 import { roadLight, ambientLight, updateLights } from './lights.js';
 import { WebPdWorkletNode, registerWebPdWorkletNode } from '@webpd/runtime'
 
@@ -43,6 +44,7 @@ async function loadPatch(name) {
 }
 
 async function startAudio() {
+  if (audioContext) return            
   console.log('starting audio...')
   audioContext = new AudioContext()
   await registerWebPdWorkletNode(audioContext)
@@ -60,15 +62,66 @@ async function startAudio() {
 // Scene
 const scene = new THREE.Scene();
 
-// Camera
+// Camera rig
+const cameraRig = new THREE.Group();
+scene.add(cameraRig);
+
 const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 5, -25);
 camera.lookAt(0, 2, 0);
+cameraRig.add(camera);
 
 // Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+
+const vrButton = VRButton.createButton(renderer, {
+  optionalFeatures: ['local-floor', 'bounded-floor']
+});
+document.body.appendChild(vrButton);
+
+// Saving camera state before entering VR so we can restore it on exit.
+const savedCameraState = {
+  position: new THREE.Vector3(),
+  quaternion: new THREE.Quaternion(),
+};
+
+renderer.xr.addEventListener('sessionstart', () => {
+  startAudio();
+
+  camera.getWorldPosition(savedCameraState.position);
+  camera.getWorldQuaternion(savedCameraState.quaternion);
+
+  cameraRig.position.copy(savedCameraState.position);
+
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  cameraRig.rotation.y = Math.atan2(camDir.x, camDir.z);
+
+  camera.position.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
+});
+
+renderer.xr.addEventListener('sessionend', () => {
+  const rigPos = cameraRig.position.clone();
+
+  cameraRig.position.set(0, 0, 0);
+  cameraRig.rotation.set(0, 0, 0);
+
+  camera.position.copy(rigPos);
+  camera.position.y = savedCameraState.position.y;
+
+  camera.quaternion.copy(savedCameraState.quaternion);
+});
+
+// Exit VR with Escape key
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && renderer.xr.isPresenting) {
+    renderer.xr.getSession().end();
+  }
+});
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -77,6 +130,7 @@ window.addEventListener('resize', () => {
 });
 
 // Add objects to scene
+scene.add(skyDome);
 scene.add(terrainGroup);
 scene.add(sunGroup);
 scene.add(roadLight);
@@ -104,30 +158,61 @@ function updateMovement() {
   lastTime = now;
 
   const forward = new THREE.Vector3();
-  camera.getWorldDirection(forward);
+
+  if (renderer.xr.isPresenting) {
+    cameraRig.getWorldDirection(forward);
+  } else {
+    camera.getWorldDirection(forward);
+  }
+
   forward.y = 0;
   forward.normalize();
-  camera.position.addScaledVector(forward, MOVE_SPEED * dt);
+
+  if (renderer.xr.isPresenting) {
+    cameraRig.position.addScaledVector(forward, MOVE_SPEED * dt);
+  } else {
+    camera.position.addScaledVector(forward, MOVE_SPEED * dt);
+  }
+}
+
+function getEffectiveCameraPosition() {
+  if (renderer.xr.isPresenting) {
+    const worldPos = new THREE.Vector3();
+    camera.getWorldPosition(worldPos);
+    return worldPos;
+  }
+  return camera.position;
 }
 
 // Render loop
 renderer.setAnimationLoop(() => {
   updateMovement();
 
+  const camPos = getEffectiveCameraPosition();
+
   // Update road center to follow camera
-  noiseUniforms.uCameraPos.value.copy(camera.position);
+  noiseUniforms.uCameraPos.value.copy(camPos);
 
   // Center terrain under camera
-  terrainGroup.position.x = camera.position.x;
-  terrainGroup.position.y = camera.position.y - 2;
-  terrainGroup.position.z = camera.position.z + 3;
+  terrainGroup.position.x = camPos.x;
+  terrainGroup.position.y = camPos.y - 2;
+  terrainGroup.position.z = camPos.z + 3;
 
   // View position for specular
-  noiseUniforms.uViewPos.value.copy(camera.position);
+  noiseUniforms.uViewPos.value.copy(camPos);
+
+  // Keep sky dome centered on camera so it always surrounds the viewer
+  skyDome.position.copy(camPos);
 
   // Update sun and lights
-  updateSunPosition(camera);
-  updateLights(camera, sunGroup.position, noiseUniforms);
+  const getSunDirection = (v) => {
+    if (renderer.xr.isPresenting) {
+      return cameraRig.getWorldDirection(v);
+    }
+    return camera.getWorldDirection(v);
+  };
+  updateSunPosition({ position: camPos, getWorldDirection: getSunDirection });
+  updateLights({ position: camPos }, sunGroup.position, noiseUniforms);
 
   if (baseLeftHz && baseRightHz) {
     const bpm = 60000 / METRO_MS
@@ -165,9 +250,6 @@ renderer.setAnimationLoop(() => {
     analyser.getByteFrequencyData(freqData)
   }
 
-  renderer.autoClear = false;
-  renderer.clear();
-  renderer.render(bgScene, bgCamera);
   renderer.render(scene, camera);
 });
 

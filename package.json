@@ -12,6 +12,7 @@
     "vite": "^8.0.1"
   },
   "dependencies": {
-    "@webpd/runtime": "^0.1.2"
+    "@webpd/runtime": "^0.1.2",
+    "three": "^0.184.0"
   }
 }
